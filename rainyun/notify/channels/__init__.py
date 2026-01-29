@@ -19,6 +19,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 from rainyun.notify.state import push_config
+from rainyun.utils.http import post_with_retry
 
 
 def _as_bool(value, default: bool = False) -> bool:
@@ -37,22 +38,6 @@ def _as_bool(value, default: bool = False) -> bool:
     if s in {"0", "false", "no", "n", "off"}:
         return False
     return default
-
-
-def post_with_retry(url: str, max_retries: int = 3, retry_delay: int = 2, **kwargs):
-    """
-    统一的 POST 重试封装。
-    """
-    last_error = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            return requests.post(url, **kwargs)
-        except requests.RequestException as e:
-            last_error = e
-            logger.warning(f"HTTP 请求异常（第{attempt}次）：{url} - {e}")
-            if attempt < max_retries:
-                time.sleep(retry_delay)
-    raise last_error
 
 
 def bark(title: str, content: str) -> None:

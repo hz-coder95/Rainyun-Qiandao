@@ -11,7 +11,6 @@ from typing import Protocol, Sequence
 import cv2
 import ddddocr
 import numpy as np
-import requests
 from .api.client import RainyunAPI
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver import ActionChains
@@ -22,6 +21,8 @@ from .browser.cookies import load_cookies
 from .browser.locators import XPATH_CONFIG
 from .browser.pages import LoginPage, RewardPage
 from .browser.session import BrowserSession, RuntimeContext
+from .utils.http import download_bytes, download_to_file
+from .utils.image import decode_image_bytes, encode_image_bytes, normalize_gray, split_sprite_image
 
 # 自定义异常：验证码处理过程中可重试的错误
 class CaptchaRetryableError(Exception):
@@ -170,48 +171,25 @@ def clear_temp_dir(temp_dir: str) -> None:
 
 
 def download_image(url: str, output_path: str, config: Config) -> bool:
-    output_dir = os.path.dirname(output_path)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-    last_error = None
-    for attempt in range(1, config.download_max_retries + 1):
-        try:
-            response = requests.get(url, timeout=config.download_timeout)
-            if response.status_code == 200:
-                with open(output_path, "wb") as f:
-                    f.write(response.content)
-                return True
-            last_error = f"status_code={response.status_code}"
-            logger.warning(f"下载图片失败 (第 {attempt} 次): {last_error}, URL: {url}")
-        except requests.RequestException as e:
-            last_error = str(e)
-            logger.warning(f"下载图片失败 (第 {attempt} 次): {e}, URL: {url}")
-        if attempt < config.download_max_retries:
-            time.sleep(config.download_retry_delay)
-    logger.error(f"下载图片失败，已重试 {config.download_max_retries} 次: {last_error}, URL: {url}")
-    return False
+    return download_to_file(url, output_path, config, log=logger)
 
 
 def download_image_bytes(url: str, config: Config, fallback_path: str | None = None) -> bytes:
-    last_error = None
-    for attempt in range(1, config.download_max_retries + 1):
-        try:
-            response = requests.get(url, timeout=config.download_timeout)
-            if response.status_code == 200 and response.content:
-                return response.content
-            last_error = f"status_code={response.status_code}"
-            logger.warning(f"内存下载图片失败 (第 {attempt} 次): {last_error}, URL: {url}")
-        except requests.RequestException as e:
-            last_error = str(e)
-            logger.warning(f"内存下载图片失败 (第 {attempt} 次): {e}, URL: {url}")
-        if attempt < config.download_max_retries:
-            time.sleep(config.download_retry_delay)
-    if fallback_path:
-        logger.warning("内存下载失败，尝试降级为文件下载")
-        if download_image(url, fallback_path, config):
-            with open(fallback_path, "rb") as f:
-                return f.read()
-    raise CaptchaRetryableError(f"验证码图片下载失败: {last_error}")
+    try:
+        return download_bytes(
+            url,
+            timeout=config.download_timeout,
+            max_retries=config.download_max_retries,
+            retry_delay=config.download_retry_delay,
+            log=logger,
+        )
+    except RuntimeError as e:
+        if fallback_path:
+            logger.warning("内存下载失败，尝试降级为文件下载")
+            if download_image(url, fallback_path, config):
+                with open(fallback_path, "rb") as f:
+                    return f.read()
+        raise CaptchaRetryableError(f"验证码图片下载失败: {e}")
 
 
 def get_url_from_style(style):
@@ -254,41 +232,6 @@ def get_element_size(element) -> tuple[float, float]:
     return float(width), float(height)
 
 
-def decode_image_bytes(image_bytes: bytes, label: str) -> np.ndarray:
-    if not image_bytes:
-        raise CaptchaRetryableError(f"{label} 数据为空，无法解码")
-    buffer = np.frombuffer(image_bytes, dtype=np.uint8)
-    image = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
-    if image is None:
-        raise CaptchaRetryableError(f"{label} 解码失败")
-    return image
-
-
-def encode_image_bytes(image: np.ndarray, label: str) -> bytes:
-    if image is None or image.size == 0:
-        raise CaptchaRetryableError(f"{label} 为空，无法编码")
-    success, encoded = cv2.imencode(".jpg", image)
-    if not success:
-        raise CaptchaRetryableError(f"{label} 编码失败")
-    return encoded.tobytes()
-
-
-def split_sprite_image(sprite: np.ndarray) -> list[np.ndarray]:
-    if sprite is None or sprite.size == 0:
-        raise CaptchaRetryableError("验证码小图为空，无法切分")
-    width = sprite.shape[1]
-    if width < 3:
-        raise CaptchaRetryableError("验证码小图宽度异常，无法切分")
-    step = width // 3
-    if step == 0:
-        raise CaptchaRetryableError("验证码小图切分宽度为 0")
-    return [
-        sprite[:, 0:step],
-        sprite[:, step:step * 2],
-        sprite[:, step * 2:width],
-    ]
-
-
 def detect_captcha_bboxes(
     ctx: RuntimeContext,
     captcha_bytes: bytes,
@@ -308,14 +251,6 @@ def detect_captcha_bboxes(
         except Exception as e:
             logger.warning(f"验证码检测失败({label}): {e}")
     return []
-
-
-def normalize_gray(image: np.ndarray) -> np.ndarray:
-    if image is None:
-        return image
-    if len(image.shape) == 2:
-        return image
-    return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
 
 def compute_sift_similarity(sprite: np.ndarray, spec: np.ndarray, sift) -> float:
