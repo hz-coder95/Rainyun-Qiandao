@@ -382,11 +382,12 @@ def process_captcha(ctx: RuntimeContext, retry_count: int = 0):
 
         try:
             captcha_bytes, captcha_image, sprites = download_captcha_assets(ctx)
-            if check_captcha(ctx, sprites):
+            if check_captcha(ctx, captcha_image, sprites):
                 logger.info(f"开始识别验证码 (第 {current_retry + 1} 次尝试)")
                 bboxes = detect_captcha_bboxes(ctx, captcha_bytes, captcha_image)
                 if not bboxes:
                     logger.error("验证码检测失败，正在重试")
+                    save_captcha_samples(captcha_image, sprites, reason="no_bboxes")
                 else:
                     result = solver.solve(captcha_image, sprites, bboxes)
                     if result:
@@ -419,10 +420,13 @@ def process_captcha(ctx: RuntimeContext, retry_count: int = 0):
                                 logger.info("验证码通过")
                                 return True
                             logger.error("验证码未通过，正在重试")
+                            save_captcha_samples(captcha_image, sprites, reason="submit_failed")
                         else:
                             logger.error("验证码识别结果无效，正在重试")
+                            save_captcha_samples(captcha_image, sprites, reason="answer_invalid")
                     else:
                         logger.error("验证码匹配失败，正在重试")
+                        save_captcha_samples(captcha_image, sprites, reason="match_failed")
             else:
                 logger.error("当前验证码识别率低，尝试刷新")
 
@@ -453,15 +457,46 @@ def download_captcha_assets(ctx: RuntimeContext) -> tuple[bytes, np.ndarray, lis
     return captcha_bytes, captcha_image, sprites
 
 
-def check_captcha(ctx: RuntimeContext, sprites: list[np.ndarray]) -> bool:
+def save_captcha_samples(
+    captcha_image: np.ndarray | None,
+    sprites: list[np.ndarray],
+    *,
+    reason: str,
+) -> None:
+    """保存验证码样本用于排查。"""
+    try:
+        base_dir = os.path.join("temp", "captcha_samples")
+        os.makedirs(base_dir, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        sample_dir = os.path.join(base_dir, f"{stamp}-{reason}-{random.randint(1000, 9999)}")
+        os.makedirs(sample_dir, exist_ok=True)
+        if captcha_image is not None and captcha_image.size > 0:
+            cv2.imwrite(os.path.join(sample_dir, "background.jpg"), captcha_image)
+        for index, sprite in enumerate(sprites, start=1):
+            if sprite is None or sprite.size == 0:
+                continue
+            cv2.imwrite(os.path.join(sample_dir, f"sprite_{index}.jpg"), sprite)
+        with open(os.path.join(sample_dir, "reason.txt"), "w", encoding="utf-8") as f:
+            f.write(f"reason:{reason}\n")
+    except Exception as e:
+        logger.warning(f"保存验证码样本失败: {e}")
+
+
+def check_captcha(ctx: RuntimeContext, captcha_image: np.ndarray, sprites: list[np.ndarray]) -> bool:
     if len(sprites) != 3:
         logger.error(f"验证码小图数量异常，期望 3，实际 {len(sprites)}")
+        save_captcha_samples(captcha_image, sprites, reason="sprite_count")
         return False
+    low_confidence = 0
     for index, sprite in enumerate(sprites, start=1):
         sprite_bytes = encode_image_bytes(sprite, f"验证码小图{index}")
         if ctx.ocr.classification(sprite_bytes) in ["0", "1"]:
-            logger.warning(f"验证码小图 {index} 识别为低置信度标记，跳过本次识别")
-            return False
+            low_confidence += 1
+            logger.warning(f"验证码小图 {index} 识别为低置信度标记")
+    if low_confidence >= 2:
+        logger.error("低置信度小图过多，跳过本次识别")
+        save_captcha_samples(captcha_image, sprites, reason="low_confidence")
+        return False
     return True
 
 
