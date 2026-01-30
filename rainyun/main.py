@@ -517,15 +517,13 @@ def check_answer(result: MatchResult) -> bool:
     return True
 
 
-def run():
+def run_with_config(config: Config) -> None:
     ctx = None
     driver = None
     temp_dir = None
     debug = False
-    config = None
     session = None
     try:
-        config = Config.from_env()
         configure(config)
         timeout = config.timeout
         max_delay = config.max_delay
@@ -537,7 +535,7 @@ def run():
 
         # 检查必要配置
         if not user or not pwd:
-            logger.error("请设置 RAINYUN_USER 和 RAINYUN_PWD 环境变量")
+            logger.error("请配置账号用户名和密码")
             return
 
         api_key = config.rainyun_api_key
@@ -638,6 +636,11 @@ def run():
         log_capture_string.close()
         if temp_dir and not debug:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def run() -> None:
+    config = Config.from_env()
+    run_with_config(config)
 
 
 if __name__ == "__main__":

@@ -2,9 +2,9 @@
 
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
-from typing import Mapping
+from typing import Any, Mapping
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +168,85 @@ def _parse_int_list(value: str) -> tuple[list[int], bool]:
     return results, False
 
 
+def _coerce_str_value(value: Any, default: str) -> str:
+    if isinstance(value, str):
+        return value
+    return default
+
+
+def _coerce_bool_value(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "y", "on")
+    return default
+
+
+def _coerce_int_value(value: Any, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if value.is_integer():
+            return int(value)
+        return default
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.isdigit():
+            return int(stripped)
+    return default
+
+
+def _coerce_float_value(value: Any, default: float) -> float:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return default
+    return default
+
+
+def _coerce_dict_str_value(value: Any, default: dict[str, str]) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        return default
+    result: dict[str, str] = {}
+    for key, item in value.items():
+        if isinstance(key, str) and isinstance(item, str):
+            result[key] = item
+    return result
+
+
+def _parse_int_list_from_any(value: Any) -> tuple[list[int], bool]:
+    if value is None:
+        return [], False
+    if isinstance(value, list):
+        results: list[int] = []
+        for item in value:
+            if isinstance(item, int):
+                results.append(item)
+            elif isinstance(item, str):
+                stripped = item.strip()
+                if not stripped:
+                    continue
+                if stripped.isdigit():
+                    results.append(int(stripped))
+                else:
+                    return [], True
+            else:
+                return [], True
+        return results, False
+    if isinstance(value, str):
+        return _parse_int_list(value)
+    return [], True
+
+
 @dataclass(frozen=True)
 class Config:
     app_base_url: str
@@ -283,6 +362,131 @@ class Config:
             chrome_bin=chrome_bin,
             chromedriver_path=chromedriver_path,
             skip_push_title=skip_push_title,
+            push_config=push_config,
+        )
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any] | None) -> "Config":
+        payload = data if isinstance(data, Mapping) else {}
+        base = cls.from_env({})
+
+        app_base_url = _coerce_str_value(payload.get("app_base_url"), base.app_base_url).rstrip("/")
+        api_base_url = _coerce_str_value(payload.get("api_base_url"), base.api_base_url).rstrip("/")
+        app_version = _coerce_str_value(payload.get("app_version"), base.app_version)
+        cookie_file = _coerce_str_value(payload.get("cookie_file"), base.cookie_file)
+
+        points_to_cny_rate = _coerce_int_value(payload.get("points_to_cny_rate"), base.points_to_cny_rate)
+        captcha_retry_limit = _coerce_int_value(payload.get("captcha_retry_limit"), base.captcha_retry_limit)
+        captcha_retry_unlimited = _coerce_bool_value(
+            payload.get("captcha_retry_unlimited"), base.captcha_retry_unlimited
+        )
+        captcha_save_samples = _coerce_bool_value(payload.get("captcha_save_samples"), base.captcha_save_samples)
+
+        request_timeout = _coerce_int_value(payload.get("request_timeout"), base.request_timeout)
+        max_retries = _coerce_int_value(payload.get("max_retries"), base.max_retries)
+        retry_delay = _coerce_float_value(payload.get("retry_delay"), base.retry_delay)
+
+        download_timeout = _coerce_int_value(payload.get("download_timeout"), base.download_timeout)
+        download_max_retries = _coerce_int_value(payload.get("download_max_retries"), base.download_max_retries)
+        download_retry_delay = _coerce_float_value(payload.get("download_retry_delay"), base.download_retry_delay)
+
+        chrome_low_memory = _coerce_bool_value(payload.get("chrome_low_memory"), base.chrome_low_memory)
+        default_renew_cost_7_days = _coerce_int_value(
+            payload.get("default_renew_cost_7_days"), base.default_renew_cost_7_days
+        )
+
+        timeout = _coerce_int_value(payload.get("timeout"), base.timeout)
+        max_delay = _coerce_int_value(payload.get("max_delay"), base.max_delay)
+        rainyun_user = _coerce_str_value(payload.get("rainyun_user"), base.rainyun_user)
+        rainyun_pwd = _coerce_str_value(payload.get("rainyun_pwd"), base.rainyun_pwd)
+        debug = _coerce_bool_value(payload.get("debug"), base.debug)
+        linux_mode = _coerce_bool_value(payload.get("linux_mode"), base.linux_mode)
+        rainyun_api_key = _coerce_str_value(payload.get("rainyun_api_key"), base.rainyun_api_key)
+
+        auto_renew = _coerce_bool_value(payload.get("auto_renew"), base.auto_renew)
+        renew_threshold_days = _coerce_int_value(
+            payload.get("renew_threshold_days"), base.renew_threshold_days
+        )
+
+        renew_product_ids_parse_error = False
+        if "renew_product_ids" in payload:
+            renew_product_ids, renew_product_ids_parse_error = _parse_int_list_from_any(
+                payload.get("renew_product_ids")
+            )
+            if renew_product_ids_parse_error:
+                renew_product_ids = base.renew_product_ids
+        else:
+            renew_product_ids = base.renew_product_ids
+
+        chrome_bin = _coerce_str_value(payload.get("chrome_bin"), base.chrome_bin)
+        chromedriver_path = _coerce_str_value(payload.get("chromedriver_path"), base.chromedriver_path)
+        skip_push_title = _coerce_str_value(payload.get("skip_push_title"), base.skip_push_title)
+
+        push_config = base.push_config.copy()
+        if "push_config" in payload:
+            push_config.update(_coerce_dict_str_value(payload.get("push_config"), {}))
+
+        return cls(
+            app_base_url=app_base_url,
+            api_base_url=api_base_url,
+            app_version=app_version,
+            cookie_file=cookie_file,
+            points_to_cny_rate=points_to_cny_rate,
+            captcha_retry_limit=captcha_retry_limit,
+            captcha_retry_unlimited=captcha_retry_unlimited,
+            captcha_save_samples=captcha_save_samples,
+            request_timeout=request_timeout,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            download_timeout=download_timeout,
+            download_max_retries=download_max_retries,
+            download_retry_delay=download_retry_delay,
+            chrome_low_memory=chrome_low_memory,
+            default_renew_cost_7_days=default_renew_cost_7_days,
+            timeout=timeout,
+            max_delay=max_delay,
+            rainyun_user=rainyun_user,
+            rainyun_pwd=rainyun_pwd,
+            debug=debug,
+            linux_mode=linux_mode,
+            rainyun_api_key=rainyun_api_key,
+            auto_renew=auto_renew,
+            renew_threshold_days=renew_threshold_days,
+            renew_product_ids=renew_product_ids,
+            renew_product_ids_parse_error=renew_product_ids_parse_error,
+            chrome_bin=chrome_bin,
+            chromedriver_path=chromedriver_path,
+            skip_push_title=skip_push_title,
+            push_config=push_config,
+        )
+
+    @classmethod
+    def from_account(cls, account: Any, settings: Any | None = None) -> "Config":
+        base = cls.from_env({})
+        auto_renew = base.auto_renew
+        renew_threshold_days = base.renew_threshold_days
+        push_config = base.push_config.copy()
+
+        if settings is not None:
+            auto_renew = getattr(settings, "auto_renew", auto_renew)
+            renew_threshold_days = getattr(settings, "renew_threshold_days", renew_threshold_days)
+            notify_config = getattr(settings, "notify_config", None)
+            if isinstance(notify_config, Mapping):
+                for key, value in notify_config.items():
+                    if isinstance(key, str) and isinstance(value, str):
+                        push_config[key] = value
+
+        renew_product_ids = list(getattr(account, "renew_products", []))
+
+        return replace(
+            base,
+            rainyun_user=getattr(account, "username", ""),
+            rainyun_pwd=getattr(account, "password", ""),
+            rainyun_api_key=getattr(account, "api_key", ""),
+            auto_renew=auto_renew,
+            renew_threshold_days=renew_threshold_days,
+            renew_product_ids=renew_product_ids,
+            renew_product_ids_parse_error=False,
             push_config=push_config,
         )
 
