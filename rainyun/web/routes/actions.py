@@ -20,7 +20,15 @@ def run_checkin(store: DataStore = Depends(get_store)) -> dict:
     runner = MultiAccountRunner(store)
     results = runner.run()
     payload = [
-        {"account_id": item.account_id, "success": item.success, "message": item.message}
+        {
+            "account_id": item.account_id,
+            "account_name": item.account_name,
+            "success": item.success,
+            "status": item.status,
+            "current_points": item.current_points,
+            "earned_points": item.earned_points,
+            "message": item.message,
+        }
         for item in results
     ]
     return success_response(payload)
@@ -32,7 +40,15 @@ def run_checkin_for_account(account_id: str, store: DataStore = Depends(get_stor
     result = runner.run_for_account(account_id)
     if result is None:
         raise ApiError("账户不存在", status_code=404)
-    payload = {"account_id": result.account_id, "success": result.success, "message": result.message}
+    payload = {
+        "account_id": result.account_id,
+        "account_name": result.account_name,
+        "success": result.success,
+        "status": result.status,
+        "current_points": result.current_points,
+        "earned_points": result.earned_points,
+        "message": result.message,
+    }
     return success_response(payload)
 
 

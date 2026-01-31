@@ -17,6 +17,7 @@ from rainyun.browser.pages import LoginPage, RewardPage
 from rainyun.browser.session import BrowserSession, RuntimeContext
 from rainyun.config import Config
 from rainyun.data.store import DataStore
+from rainyun.server.manager import ServerManager
 from rainyun.main import process_captcha
 
 logger = logging.getLogger(__name__)
@@ -32,8 +33,24 @@ except Exception:
 @dataclass
 class AccountRunResult:
     account_id: str
+    account_name: str
+    success: bool
+    status: str
+    current_points: int | None = None
+    earned_points: int | None = None
+    message: str = ""
+
+
+@dataclass
+class AccountRenewResult:
+    account_id: str
+    account_name: str
+    has_api_key: bool
+    whitelist_ids: list[int]
+    server_names: list[str]
     success: bool
     message: str = ""
+    report: str = ""
 
 
 class MultiAccountRunner:
@@ -105,7 +122,10 @@ class MultiAccountRunner:
 
     def run_for_account(self, account_id: str) -> AccountRunResult | None:
         data = self.store.load() if self.store.data is None else self.store.data
-        account = next((item for item in data.accounts if item.id == account_id), None)
+        account = next(
+            (item for item in data.accounts if str(getattr(item, "id", "")) == str(account_id)),
+            None,
+        )
         if not account:
             return None
         base_config, session, driver, wait, temp_dir, ocr, det = self._create_session(data.settings)
@@ -121,6 +141,66 @@ class MultiAccountRunner:
             )
         finally:
             self._close_session(session, temp_dir, base_config)
+
+    def run_renew(self) -> list[AccountRenewResult]:
+        data = self.store.load() if self.store.data is None else self.store.data
+        if not data.accounts:
+            logger.info("未配置任何账户，跳过续费检查")
+            return []
+        results: list[AccountRenewResult] = []
+        for account in data.accounts:
+            if not account.enabled:
+                continue
+            account_id = str(getattr(account, "id", "") or "").strip()
+            account_name = str(getattr(account, "name", "") or "").strip() or account_id
+            if not getattr(account, "api_key", ""):
+                results.append(
+                    AccountRenewResult(
+                        account_id=account_id,
+                        account_name=account_name,
+                        has_api_key=False,
+                        whitelist_ids=[],
+                        server_names=[],
+                        success=False,
+                        message="no_api_key",
+                    )
+                )
+                continue
+            try:
+                config = Config.from_account(account, data.settings)
+                manager = ServerManager(account.api_key, config=config)
+                result = manager.check_and_renew()
+                report = manager.generate_report(result)
+                server_names = [
+                    item.get("name", "") for item in result.get("servers", []) if item.get("name")
+                ]
+                whitelist_ids = list(config.renew_product_ids)
+                results.append(
+                    AccountRenewResult(
+                        account_id=account_id,
+                        account_name=account_name,
+                        has_api_key=True,
+                        whitelist_ids=whitelist_ids,
+                        server_names=server_names,
+                        success=True,
+                        message="ok",
+                        report=report,
+                    )
+                )
+            except Exception as exc:
+                logger.error("账户 %s 续费检查失败: %s", account_id, exc)
+                results.append(
+                    AccountRenewResult(
+                        account_id=account_id,
+                        account_name=account_name,
+                        has_api_key=True,
+                        whitelist_ids=[],
+                        server_names=[],
+                        success=False,
+                        message=str(exc),
+                    )
+                )
+        return results
 
     def _run_single_account(
         self,
@@ -167,15 +247,32 @@ class MultiAccountRunner:
             if not logged_in:
                 logged_in = login_page.login(config.rainyun_user, config.rainyun_pwd)
             if not logged_in:
-                return self._mark_result(account, success=False, message="login_failed")
+                return self._mark_result(
+                    account, success=False, message="login_failed", status="failed"
+                )
 
-            reward_page.handle_daily_reward(start_points)
-            return self._mark_result(account, success=True, message="success")
+            reward_result = reward_page.handle_daily_reward(start_points)
+            return self._mark_result(
+                account,
+                success=True,
+                message="success",
+                status=reward_result.get("status", "success"),
+                current_points=reward_result.get("current_points"),
+                earned_points=reward_result.get("earned"),
+            )
         except Exception as exc:
-            logger.error("账户 %s 执行失败: %s", getattr(account, "id", "unknown"), exc)
-            return self._mark_result(account, success=False, message=str(exc))
+            logger.error("账户 %s 签到失败: %s", getattr(account, "id", "unknown"), exc)
+            return self._mark_result(account, success=False, message=str(exc), status="failed")
 
-    def _mark_result(self, account: Any, success: bool, message: str) -> AccountRunResult:
+    def _mark_result(
+        self,
+        account: Any,
+        success: bool,
+        message: str,
+        status: str,
+        current_points: int | None = None,
+        earned_points: int | None = None,
+    ) -> AccountRunResult:
         now = datetime.now().isoformat()
         account.last_checkin = now
         account.last_status = "success" if success else message or "failed"
@@ -183,4 +280,14 @@ class MultiAccountRunner:
             self.store.update_account(account)
         except Exception as exc:
             logger.error("回写账户状态失败: %s", exc)
-        return AccountRunResult(account_id=getattr(account, "id", ""), success=success, message=message)
+        account_id = str(getattr(account, "id", "") or "").strip()
+        account_name = str(getattr(account, "name", "") or "").strip() or account_id
+        return AccountRunResult(
+            account_id=account_id,
+            account_name=account_name,
+            success=success,
+            status=status,
+            current_points=current_points,
+            earned_points=earned_points,
+            message=message,
+        )

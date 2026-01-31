@@ -11,7 +11,7 @@ if [ "$CRON_MODE" = "true" ]; then
     if [ "$WEB_ENABLED" = "true" ]; then
         echo "=== Web 面板启动 ==="
         echo "地址: http://${WEB_HOST}:${WEB_PORT}"
-        uvicorn rainyun.web.app:app --host "$WEB_HOST" --port "$WEB_PORT" &
+        uvicorn rainyun.web.app:app --host "$WEB_HOST" --port "$WEB_PORT" --no-access-log &
     else
         echo "=== Web 面板已关闭 ==="
     fi
@@ -23,7 +23,7 @@ else
     if [ "$WEB_ENABLED" = "true" ]; then
         echo "=== Web 面板启动 ==="
         echo "地址: http://${WEB_HOST}:${WEB_PORT}"
-        exec uvicorn rainyun.web.app:app --host "$WEB_HOST" --port "$WEB_PORT"
+        exec uvicorn rainyun.web.app:app --host "$WEB_HOST" --port "$WEB_PORT" --no-access-log
     fi
     echo "=== Web 面板已关闭，未启用定时模式，容器退出 ==="
     exit 0

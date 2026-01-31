@@ -255,9 +255,29 @@ class ServerManager:
             lines.append("")
             for server in result["servers"]:
                 status = "✅ 已续费" if server["renewed"] else ""
-                days_emoji = "🔴" if server["days_remaining"] <= 3 else "🟡" if server["days_remaining"] <= 7 else "🟢"
+                skip_reason = ""
+                if not server["renewed"]:
+                    if self._whitelist_parse_error:
+                        skip_reason = "⏭ 白名单配置错误，已禁用续费"
+                    elif server["days_remaining"] > self.renew_threshold:
+                        skip_reason = f"⏭ 未达阈值 {self.renew_threshold} 天"
+                    elif self.renew_product_ids and server["id"] not in self.renew_product_ids:
+                        skip_reason = "⏭ 不在白名单"
+                    elif not self.auto_renew:
+                        skip_reason = "⏭ 自动续费关闭"
+                    else:
+                        skip_reason = "⏭ 续费未执行（见警告）"
+                days_emoji = (
+                    "🔴"
+                    if server["days_remaining"] <= 3
+                    else "🟡"
+                    if server["days_remaining"] <= 7
+                    else "🟢"
+                )
                 lines.append(f"🖥️ {server['name']} (续费: {server['renew_price']}积分/7天)")
-                lines.append(f"   {days_emoji} 剩余 {server['days_remaining']} 天 ({server['expired']}) {status}")
+                lines.append(
+                    f"   {days_emoji} 剩余 {server['days_remaining']} 天 ({server['expired']}) {status} {skip_reason}".strip()
+                )
         else:
             lines.append("📭 无服务器")
 

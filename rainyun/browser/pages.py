@@ -84,7 +84,7 @@ class RewardPage:
     def open(self) -> None:
         self.ctx.driver.get(build_app_url(self.ctx.config, "/account/reward/earn"))
 
-    def handle_daily_reward(self, start_points: int) -> None:
+    def handle_daily_reward(self, start_points: int) -> dict:
         self.open()
         try:
             # 使用显示等待寻找按钮
@@ -99,24 +99,38 @@ class RewardPage:
             for pattern in already_signed_patterns:
                 if pattern in page_source:
                     logger.info(f"今日已签到（检测到：{pattern}），跳过签到流程")
-                    self._log_points(start_points)
-                    return
+                    current_points, earned = self._log_points(start_points)
+                    return {
+                        "status": "already_signed",
+                        "current_points": current_points,
+                        "earned": earned,
+                    }
             raise Exception("未找到签到按钮，且未检测到已签到状态，可能页面结构已变更")
 
         logger.info("处理验证码")
         self.ctx.driver.switch_to.frame("tcaptcha_iframe_dy")
         if not self.captcha_handler(self.ctx):
-            logger.error(f"验证码重试次数过多，任务失败。当前页面状态: {self.ctx.driver.current_url}")
+            logger.error(
+                f"验证码重试次数过多，签到失败。当前页面状态: {self.ctx.driver.current_url}"
+            )
             raise Exception("验证码识别重试次数过多，签到失败")
         self.ctx.driver.switch_to.default_content()
-        self._log_points(start_points)
+        current_points, earned = self._log_points(start_points)
+        logger.info("签到成功")
+        return {
+            "status": "signed",
+            "current_points": current_points,
+            "earned": earned,
+        }
 
-    def _log_points(self, start_points: int) -> None:
+    def _log_points(self, start_points: int) -> tuple[int | None, int | None]:
         try:
             current_points = self.ctx.api.get_user_points()
             earned = current_points - start_points
             logger.info(
                 f"当前剩余积分: {current_points} (本次获得 {earned} 分) | 约为 {current_points / self.ctx.config.points_to_cny_rate:.2f} 元"
             )
+            return current_points, earned
         except Exception:
             logger.info("无法通过 API 获取当前积分信息")
+            return None, None
