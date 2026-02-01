@@ -30,6 +30,7 @@ const accountPassword = document.getElementById("account-password");
 const accountApiKey = document.getElementById("account-api-key");
 const accountRenew = document.getElementById("account-renew");
 const accountEnabled = document.getElementById("account-enabled");
+const accountAutoRenew = document.getElementById("account-auto-renew");
 
 const settingAutoRenew = document.getElementById("setting-auto-renew");
 const settingRenewDays = document.getElementById("setting-renew-days");
@@ -1437,6 +1438,8 @@ async function loadAccounts() {
   accountsCache.forEach((account) => {
     const row = document.createElement("tr");
     const canRenew = !!account.api_key;
+    const autoRenewEnabled = account.auto_renew !== false;
+    const autoRenewLabel = autoRenewEnabled ? "自动续费：开" : "自动续费：关";
     row.innerHTML = `
       <td>${account.name || account.id}</td>
       <td>${account.enabled ? "是" : "否"}</td>
@@ -1448,6 +1451,7 @@ async function loadAccounts() {
       <td>
         <button class="ghost-btn" data-action="checkin" data-id="${account.id}">签到</button>
         <button class="ghost-btn" data-action="renew" data-id="${account.id}" ${canRenew ? "" : "disabled"}>续费</button>
+        <button class="ghost-btn" data-action="toggle-renew" data-id="${account.id}">${autoRenewLabel}</button>
         <button class="ghost-btn" data-action="edit" data-id="${account.id}">编辑</button>
         <button class="ghost-btn" data-action="delete" data-id="${account.id}">删除</button>
       </td>
@@ -1556,6 +1560,7 @@ function resetForm() {
   accountApiKey.value = "";
   accountRenew.value = "";
   accountEnabled.checked = true;
+  accountAutoRenew.checked = true;
 }
 
 function fillForm(account) {
@@ -1567,6 +1572,7 @@ function fillForm(account) {
   accountApiKey.value = account.api_key || "";
   accountRenew.value = (account.renew_products || []).join(",");
   accountEnabled.checked = !!account.enabled;
+  accountAutoRenew.checked = account.auto_renew !== false;
   setAccountFormVisible(true);
 }
 
@@ -1582,6 +1588,7 @@ async function saveAccount() {
       .filter(Boolean)
       .map((item) => Number(item)),
     enabled: accountEnabled.checked,
+    auto_renew: accountAutoRenew.checked,
   };
   try {
     if (editingId) {
@@ -1615,6 +1622,43 @@ async function deleteAccount(id) {
     await loadAccounts();
   } catch (err) {
     showToast(err.message || "删除失败", "error");
+  }
+}
+
+async function toggleAccountAutoRenew(id) {
+  let account = accountsCache.find((item) => String(item.id) === String(id));
+  if (!account) {
+    const accounts = await apiFetch("/api/accounts");
+    accountsCache = Array.isArray(accounts) ? accounts : [];
+    account = accountsCache.find((item) => String(item.id) === String(id));
+  }
+  if (!account) {
+    showToast("账户不存在", "error");
+    return;
+  }
+  const current = account.auto_renew !== false;
+  const payload = {
+    name: account.name || "",
+    username: account.username || "",
+    password: account.password || "",
+    api_key: account.api_key || "",
+    renew_products: Array.isArray(account.renew_products)
+      ? account.renew_products
+          .map((item) => Number(item))
+          .filter((item) => Number.isFinite(item))
+      : [],
+    enabled: account.enabled !== false,
+    auto_renew: !current,
+  };
+  try {
+    await apiFetch(`/api/accounts/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+    showToast(`自动续费已${current ? "关闭" : "开启"}`);
+    await loadAccounts();
+  } catch (err) {
+    showToast(err.message || "更新失败", "error");
   }
 }
 
@@ -1806,6 +1850,9 @@ accountsBody.addEventListener("click", async (event) => {
   }
   if (action === "renew") {
     await runRenewForAccount(id);
+  }
+  if (action === "toggle-renew") {
+    await toggleAccountAutoRenew(id);
   }
 });
 

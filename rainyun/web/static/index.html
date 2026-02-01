@@ -87,13 +87,26 @@
                 <input id="account-enabled" type="checkbox" checked />
                 <span>启用账户</span>
               </label>
+              <label class="field checkbox">
+                <input id="account-auto-renew" type="checkbox" checked />
+                <span>自动续费</span>
+              </label>
               <button id="save-account" class="primary-btn full">保存账户</button>
             </div>
           </div>
           <div class="card">
             <div class="card-header">
               <h3>账户列表</h3>
-              <button id="refresh-accounts" class="ghost-btn">刷新</button>
+              <div class="card-actions">
+                <div class="toggle">
+                  <span>全局自动续费</span>
+                  <label class="switch">
+                    <input id="setting-auto-renew" type="checkbox" />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+                <button id="refresh-accounts" class="ghost-btn">刷新</button>
+              </div>
             </div>
             <div class="table-wrap">
               <table>
@@ -121,10 +134,6 @@
                 <h3>系统设置</h3>
               </div>
               <div class="form-grid">
-                <label class="field checkbox">
-                  <input id="setting-auto-renew" type="checkbox" />
-                  <span>自动续费</span>
-                </label>
                 <label class="field">
                   <span>续费阈值（天）</span>
                   <input id="setting-renew-days" type="number" min="1" />

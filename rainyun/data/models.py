@@ -146,6 +146,7 @@ class Account:
     password: str = ""
     api_key: str = ""
     enabled: bool = True
+    auto_renew: bool = True
     renew_products: list[int] = field(default_factory=list)
     last_checkin: str = ""
     last_status: str = "unknown"
@@ -161,6 +162,7 @@ class Account:
             password=_read_str(payload, "password", ""),
             api_key=_read_str(payload, "api_key", ""),
             enabled=_read_bool(payload, "enabled", True),
+            auto_renew=_read_bool(payload, "auto_renew", True),
             renew_products=_read_list_int(payload, "renew_products"),
             last_checkin=_read_str(payload, "last_checkin", ""),
             last_status=_read_str(payload, "last_status", "unknown"),
@@ -175,6 +177,7 @@ class Account:
             "password": self.password,
             "api_key": self.api_key,
             "enabled": self.enabled,
+            "auto_renew": self.auto_renew,
             "renew_products": list(self.renew_products),
             "last_checkin": self.last_checkin,
             "last_status": self.last_status,

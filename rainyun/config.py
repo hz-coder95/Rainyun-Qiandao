@@ -511,6 +511,8 @@ class Config:
             if isinstance(raw_channels, list):
                 notify_channels = [dict(item) for item in raw_channels if isinstance(item, Mapping)]
 
+        account_auto_renew = getattr(account, "auto_renew", True)
+        auto_renew = bool(auto_renew) and bool(account_auto_renew)
         renew_product_ids = list(getattr(account, "renew_products", []))
         cookie_file = base.cookie_file
         cookie_dir = os.path.dirname(cookie_file)
